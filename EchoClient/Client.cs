@@ -1,7 +1,10 @@
 ﻿using System;
 using System.IO;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Xml.Schema;
 
 namespace EchoClient
@@ -18,10 +21,28 @@ namespace EchoClient
         public void Start()
         {
 
-            using (TcpClient connectionSocket = new TcpClient(IPAddress.Loopback.ToString(), PORT))
-            using (Stream ns = connectionSocket.GetStream())
-            using (StreamReader sr = new StreamReader(ns))
-            using (StreamWriter sw = new StreamWriter(ns))
+            TcpClient connectionSocket = new TcpClient("192.168.104.136", PORT);
+            Stream uns = connectionSocket.GetStream();
+            bool leaveInnerStreamOpen = false;
+            SslStream sslStream = new SslStream(uns, leaveInnerStreamOpen, new RemoteCertificateValidationCallback(ValidateServerCertificate),null);
+            try
+            {
+                sslStream.AuthenticateAsClient("FakeServerName");
+            }
+            catch (AuthenticationException e)
+            {
+                Console.WriteLine("Exception: {0}", e.Message);
+                if (e.InnerException != null)
+                {
+                    Console.WriteLine("Inner exception: {0}", e.InnerException.Message);
+                }
+                Console.WriteLine("Authentication failed - closing the connection.");
+                connectionSocket.Close();
+                return;
+            }
+
+            using (StreamReader sr = new StreamReader(sslStream))
+            using (StreamWriter sw = new StreamWriter(sslStream))
             {
                 Console.WriteLine("Client have connected");
                 sw.AutoFlush = true; // enable automatic flushing
@@ -73,6 +94,22 @@ namespace EchoClient
             string serverAnswer = sr.ReadLine();
             Console.WriteLine("Server: " + serverAnswer);
             
+        }
+
+        // The following method is invoked by the RemoteCertificateValidationDelegate.
+        public static bool ValidateServerCertificate(
+            object sender,
+            X509Certificate certificate,
+            X509Chain chain,
+            SslPolicyErrors sslPolicyErrors)
+        {
+            if (sslPolicyErrors == SslPolicyErrors.None)
+                return true;
+
+            Console.WriteLine("Certificate error: {0}", sslPolicyErrors);
+
+            // Do not allow this client to communicate with unauthenticated servers.
+            return false;
         }
     }
 }
